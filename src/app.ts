@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
+import path from 'path';
 
 import { connectDB, closePool } from './config/database';
 import { errorHandler } from './middleware/errorHandler';
@@ -11,7 +12,6 @@ import { metricsMiddleware, register } from './utils/metrics';
 import { healthCheck, livenessCheck, readinessCheck } from './controllers/healthController';
 import tracingSdk from './utils/tracing';
 import { tracingMiddleware } from './middleware/tracingMiddleware';
-import { globalRateLimiter, apiRateLimiter, rateLimitMetrics } from './middleware/rateLimiting';
 import {
   dataPreservationMiddleware,
   softDeleteMiddleware,
@@ -34,13 +34,43 @@ app.use(cors());
 // Safety net middleware - should be first to catch dangerous operations
 app.use(safetyNetMiddleware);
 
-// Rate limiting middleware - should be early in the chain
-app.use(globalRateLimiter);
-app.use(rateLimitMetrics);
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Test route to verify routing is working
+app.get('/test-route', (req, res) => {
+  res.send('Route is working!');
+});
+
+// Redirect root to dashboard - this should be before static middleware
+app.get('/', (req, res) => {
+  res.redirect('/dashboard/index.html');
+});
+
+// Serve static files (HTML, CSS, JS, images) from the project root
+app.use(express.static(path.join(__dirname, '..'), {
+  fallthrough: true // Allow other routes to handle if file not found
+}));
+
+// Also serve static files from subdirectories to handle the organized structure
+app.use('/dashboard', express.static(path.join(__dirname, '../dashboard')));
+app.use('/customer', express.static(path.join(__dirname, '../customer')));
+app.use('/lead', express.static(path.join(__dirname, '../lead')));
+app.use('/deal', express.static(path.join(__dirname, '../deal')));
+app.use('/task', express.static(path.join(__dirname, '../task')));
+app.use('/quote', express.static(path.join(__dirname, '../quote')));
+app.use('/invoicing', express.static(path.join(__dirname, '../invoicing')));
+app.use('/payment', express.static(path.join(__dirname, '../payment')));
+app.use('/report', express.static(path.join(__dirname, '../report')));
+app.use('/setting', express.static(path.join(__dirname, '../setting')));
+app.use('/authentication', express.static(path.join(__dirname, '../authentication')));
+app.use('/application', express.static(path.join(__dirname, '../application')));
+app.use('/widget', express.static(path.join(__dirname, '../widget')));
+app.use('/help', express.static(path.join(__dirname, '../help')));
+app.use('/assets', express.static(path.join(__dirname, '../assets')));
+app.use('/partials', express.static(path.join(__dirname, '../partials')));
 
 // Data preservation middleware
 app.use(dataPreservationMiddleware);
@@ -64,9 +94,6 @@ connectDB().catch(error => {
 
 // Apply soft delete middleware before API routes
 app.use('/api', softDeleteMiddleware);
-
-// Apply API-specific rate limiting to API routes
-app.use('/api', apiRateLimiter);
 
 // Routes
 app.use('/api', routes);
