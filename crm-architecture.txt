@@ -1,0 +1,352 @@
+CRM SAAS MULTI-TENANT ARCHITECTURE WITH NODE.JS
+==============================================
+
+ARCHITECTURE OVERVIEW
+-------------------
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Super Admin   │    │   Tenant A      │    │   Tenant B      │
+│   Dashboard     │    │   CRM Instance  │    │   CRM Instance  │
+└─────────┬───────┘    └─────────┬───────┘    └─────────┬───────┘
+          │                      │                      │
+          └──────────────────────┼──────────────────────┘
+                                 │
+                    ┌─────────────┴─────────────┐
+                    │    Node.js API Server     │
+                    │    (Multi-Tenant)         │
+                    └─────────────┬─────────────┘
+                                 │
+                    ┌─────────────┴─────────────┐
+                    │      PostgreSQL DB        │
+                    │    (Row-Level Security)   │
+                    └───────────────────────────┘
+
+TECHNICAL STACK DETAILS
+----------------------
+Backend Framework: Express.js with TypeScript
+Database: PostgreSQL with row-level security
+ORM: Prisma or Sequelize
+Authentication: Passport.js with JWT
+Authorization: CASL for permissions
+Real-time: Socket.IO
+File Upload: Multer with AWS S3
+Email: Nodemailer with SendGrid
+Payment: Stripe API
+Caching: Redis
+Validation: Joi or Class-validator
+Logging: Winston with Morgan
+Testing: Jest and Supertest
+Documentation: Swagger/OpenAPI
+
+DATABASE SCHEMA DESIGN
+---------------------
+-- Core multi-tenant tables
+public.tenants (
+  id UUID PRIMARY KEY,
+  name VARCHAR(255),
+  subdomain VARCHAR(255) UNIQUE,
+  stripe_customer_id VARCHAR(255),
+  subscription_status VARCHAR(50),
+  plan_type VARCHAR(50),
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
+)
+
+public.users (
+  id UUID PRIMARY KEY,
+  email VARCHAR(255) UNIQUE,
+  password_hash TEXT,
+  tenant_id UUID REFERENCES tenants(id),
+  role VARCHAR(50), -- 'super_admin', 'company_admin', 'user'
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
+)
+
+-- Tenant-specific tables with tenant_id
+tenant_data.customers (
+  id UUID PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id),
+  first_name VARCHAR(100),
+  last_name VARCHAR(100),
+  email VARCHAR(255),
+  phone VARCHAR(50),
+  company VARCHAR(255),
+  status VARCHAR(50), -- 'lead', 'customer', 'prospect'
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
+)
+
+tenant_data.leads (
+  id UUID PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id),
+  customer_id UUID REFERENCES customers(id),
+  source VARCHAR(100),
+  status VARCHAR(50), -- 'new', 'contacted', 'qualified', 'closed_won', 'closed_lost'
+  value DECIMAL(10,2),
+  assigned_to UUID REFERENCES users(id),
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
+)
+
+tenant_data.deals (
+  id UUID PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id),
+  lead_id UUID REFERENCES leads(id),
+  stage VARCHAR(50), -- 'prospecting', 'qualification', 'proposal', 'negotiation', 'closed_won', 'closed_lost'
+  value DECIMAL(10,2),
+  probability INTEGER, -- 0-100 percentage
+  close_date DATE,
+  assigned_to UUID REFERENCES users(id),
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
+)
+
+tenant_data.tasks (
+  id UUID PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id),
+  title VARCHAR(255),
+  description TEXT,
+  assigned_to UUID REFERENCES users(id),
+  due_date TIMESTAMP,
+  status VARCHAR(50), -- 'pending', 'in_progress', 'completed'
+  priority VARCHAR(20), -- 'low', 'medium', 'high'
+  created_by UUID REFERENCES users(id),
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
+)
+
+-- Row-level security policies
+CREATE POLICY tenant_isolation_policy ON tenant_data.customers
+  FOR ALL TO authenticated_user
+  USING (tenant_id = current_setting('app.current_tenant')::uuid);
+
+NODE.JS IMPLEMENTATION STRUCTURE
+-------------------------------
+project-root/
+├── src/
+│   ├── config/                 # Configuration files
+│   │   ├── database.ts
+│   │   ├── auth.ts
+│   │   └── redis.ts
+│   ├── middleware/             # Custom middleware
+│   │   ├── tenantResolver.ts
+│   │   ├── auth.ts
+│   │   └── rbac.ts
+│   ├── models/                 # Database models
+│   │   ├── Tenant.ts
+│   │   ├── User.ts
+│   │   ├── Customer.ts
+│   │   ├── Lead.ts
+│   │   └── Deal.ts
+│   ├── controllers/            # Request handlers
+│   │   ├── authController.ts
+│   │   ├── tenantController.ts
+│   │   ├── customerController.ts
+│   │   └── leadController.ts
+│   ├── routes/                 # API routes
+│   │   ├── auth.ts
+│   │   ├── tenants.ts
+│   │   ├── customers.ts
+│   │   └── leads.ts
+│   ├── services/               # Business logic
+│   │   ├── authService.ts
+│   │   ├── tenantService.ts
+│   │   ├── customerService.ts
+│   │   └── emailService.ts
+│   ├── utils/                  # Utility functions
+│   │   ├── helpers.ts
+│   │   └── validators.ts
+│   ├── types/                  # TypeScript definitions
+│   └── app.ts                  # Main application file
+├── tests/                      # Test files
+├── migrations/                 # Database migrations
+├── docker/                     # Docker configuration
+├── package.json
+└── README.md
+
+KEY MIDDLEWARE COMPONENTS
+------------------------
+1. Tenant Resolver Middleware
+   - Extracts tenant info from subdomain or header
+   - Sets current tenant in request context
+   - Validates tenant existence and subscription status
+
+2. Authentication Middleware
+   - Verifies JWT tokens
+   - Attaches user info to request object
+   - Checks user status and permissions
+
+3. Authorization Middleware
+   - Validates user permissions for resources
+   - Implements role-based access control
+   - Prevents unauthorized access to tenant data
+
+MULTI-TENANCY IMPLEMENTATION
+---------------------------
+Method 1: Single Database with Row-Level Security (Recommended)
+- All tenants share one database
+- Tenant isolation via tenant_id column and RLS
+- Cost-effective and easy to maintain
+- Requires careful attention to security
+
+Method 2: Separate Schemas per Tenant
+- Each tenant gets their own schema
+- Stronger isolation than RLS
+- More complex management
+- Better performance isolation
+
+IMPLEMENTATION EXAMPLES
+----------------------
+
+// Tenant resolver middleware
+export const resolveTenant = async (req: Request, res: Response, next: NextFunction) => {
+  // Extract tenant from subdomain or header
+  const host = req.get('Host');
+  const subdomain = host?.split('.')[0]; // e.g., company1.yourcrm.com
+  
+  if (!subdomain) {
+    return res.status(400).json({ error: 'Invalid tenant identifier' });
+  }
+  
+  // Find tenant by subdomain
+  const tenant = await prisma.tenant.findUnique({
+    where: { subdomain }
+  });
+  
+  if (!tenant) {
+    return res.status(404).json({ error: 'Tenant not found' });
+  }
+  
+  // Check subscription status
+  if (tenant.subscription_status !== 'active') {
+    return res.status(402).json({ error: 'Subscription inactive' });
+  }
+  
+  // Attach tenant to request
+  req.tenant = tenant;
+  
+  // Set tenant context for database queries
+  await prisma.$executeRaw`SELECT set_config('app.current_tenant', ${tenant.id}, false)`;
+  
+  next();
+};
+
+// Authentication middleware
+export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
+  const token = req.header('Authorization')?.replace('Bearer ', '');
+  
+  if (!token) {
+    return res.status(401).json({ error: 'Access denied. No token provided.' });
+  }
+  
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as JwtPayload;
+    
+    // Get user with tenant association
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+      include: { tenant: true }
+    });
+    
+    if (!user || !user.isActive) {
+      return res.status(401).json({ error: 'Invalid token or user inactive.' });
+    }
+    
+    // Verify user belongs to current tenant (for non-super admins)
+    if (user.role !== 'super_admin' && user.tenantId !== req.tenant?.id) {
+      return res.status(403).json({ error: 'Access forbidden' });
+    }
+    
+    req.user = user;
+    next();
+  } catch (error) {
+    res.status(400).json({ error: 'Invalid token.' });
+  }
+};
+
+// Example controller with tenant isolation
+export const getCustomers = async (req: Request, res: Response) => {
+  try {
+    const customers = await prisma.customer.findMany({
+      where: {
+        tenantId: req.tenant!.id  // Always filter by current tenant
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    
+    res.json(customers);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch customers' });
+  }
+};
+
+SCALABILITY CONSIDERATIONS
+-------------------------
+1. Database Sharding
+   - Shard by tenant_id when dataset grows large
+   - Use partitioning for historical data
+   - Implement read replicas for analytics
+
+2. Caching Strategy
+   - Redis for session management
+   - Cache frequently accessed data
+   - Implement cache invalidation strategies
+
+3. Load Balancing
+   - Distribute requests across multiple instances
+   - Health checks for instance monitoring
+   - Sticky sessions if needed
+
+4. CDN Integration
+   - Serve static assets from CDN
+   - Reduce server load
+   - Improve global performance
+
+SECURITY MEASURES
+---------------
+1. Data Isolation
+   - Row-level security policies
+   - Input validation and sanitization
+   - Parameterized queries to prevent SQL injection
+
+2. Authentication & Authorization
+   - Strong password policies
+   - Multi-factor authentication
+   - Role-based access control
+   - Session management
+
+3. API Security
+   - Rate limiting
+   - CORS configuration
+   - Input validation
+   - Secure headers
+
+MONITORING AND MAINTENANCE
+------------------------
+1. Application Monitoring
+   - Request/response times
+   - Error rates
+   - Resource utilization
+   - Tenant-specific metrics
+
+2. Database Monitoring
+   - Query performance
+   - Connection pool usage
+   - Disk space utilization
+   - Slow query detection
+
+3. Business Metrics
+   - Active tenants
+   - User engagement
+   - Revenue tracking
+   - Churn prediction
+
+DEPLOYMENT STRATEGY
+-----------------
+1. Containerization with Docker
+2. Orchestration with Kubernetes (optional)
+3. Blue-green deployment for zero-downtime updates
+4. Automated testing in CI/CD pipeline
+5. Environment-specific configurations
+
+This architecture provides a solid foundation for a multi-tenant CRM SaaS platform using Node.js, with proper data isolation, scalability, and security measures in place.

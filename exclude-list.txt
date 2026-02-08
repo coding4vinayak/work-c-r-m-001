@@ -1,0 +1,9 @@
+package/
+node_modules/
+.git/
+.vscode/
+dist/
+.nyc_output/
+coverage/
+*.log
+.DS_Store
