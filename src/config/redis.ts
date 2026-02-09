@@ -1,41 +1,52 @@
-import Redis from 'redis';
+import { Redis } from 'ioredis';
+import dotenv from 'dotenv';
 
-// Redis connection configuration
-export const redisConnection = {
-  host: process.env.REDIS_HOST || '127.0.0.1',
-  port: parseInt(process.env.REDIS_PORT || '6379'),
-  password: process.env.REDIS_PASSWORD || undefined,
+dotenv.config();
+
+// Redis connection configuration for ABETWORKS WORKCRM
+export const redisConnection = new Redis({
+  host: process.env.REDIS_HOST || process.env.REDIS_URL?.split(':')[1]?.replace('//', '') || 'localhost',
+  port: parseInt(process.env.REDIS_PORT || process.env.REDIS_URL?.split(':')[2] || '6379'),
+  username: process.env.REDIS_USERNAME,
+  password: process.env.REDIS_PASSWORD,
   db: parseInt(process.env.REDIS_DB || '0'),
-};
-
-// Create Redis client
-export const redisClient = Redis.createClient({
-  socket: {
-    host: redisConnection.host,
-    port: redisConnection.port,
-  },
-  password: redisConnection.password,
-  database: redisConnection.db,
+  // Connection options for optimal performance
+  connectTimeout: parseInt(process.env.REDIS_CONNECT_TIMEOUT || '30000'), // 30 seconds
+  commandTimeout: parseInt(process.env.REDIS_COMMAND_TIMEOUT || '20000'), // 20 seconds
+  maxRetriesPerRequest: parseInt(process.env.REDIS_MAX_RETRIES || '3'),
+  enableReadyCheck: true,
+  lazyConnect: true, // Don't connect immediately
+  // Removed unsupported options
+  // retryDelayOnFailover: parseInt(process.env.REDIS_RETRY_DELAY || '100'), // 100ms
+  // maxLoadingTimeout: parseInt(process.env.REDIS_MAX_LOADING_TIMEOUT || '2000'), // 2 seconds
+  readOnly: false,
+  // TLS configuration (if needed)
+  tls: process.env.REDIS_TLS === 'true' ? {
+    rejectUnauthorized: process.env.REDIS_TLS_REJECT_UNAUTHORIZED !== 'false'
+  } : undefined,
 });
 
-// Connect to Redis with fallback
+// Test Redis connection
 export const connectRedis = async () => {
   try {
-    await redisClient.connect();
-    console.log('Connected to Redis successfully');
-    return true;
+    await redisConnection.connect();
+    console.log('Redis connected successfully for ABETWORKS WORKCRM');
+    
+    // Test the connection
+    await redisConnection.ping();
+    console.log('Redis ping successful');
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.warn('Could not connect to Redis:', errorMessage);
-    console.log('Running in Redis-less mode - some features may be limited');
-    return false;
+    console.error('Failed to connect to Redis for ABETWORKS WORKCRM:', error);
+    process.exit(1);
   }
 };
 
-// Initialize Redis connection
-connectRedis().catch((error: unknown) => {
-  const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-  console.warn('Redis initialization failed:', errorMessage);
-});
+// Function to close Redis connection
+export const closeRedis = async () => {
+  console.log('Closing Redis connection...');
+  await redisConnection.quit();
+  console.log('Redis connection closed');
+};
 
-export default redisClient;
+// Export for use in other modules
+export default redisConnection;

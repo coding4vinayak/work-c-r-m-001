@@ -3,11 +3,14 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import path from 'path';
+import rateLimit from 'express-rate-limit';
+import { Redis } from 'ioredis';
 
 import { connectDB, closePool } from './config/database';
+import { connectRedis, redisConnection } from './config/redis';
 import { errorHandler } from './middleware/errorHandler';
 import routes from './routes';
-import { requestLogger, errorLogger, performanceMetrics } from './utils/logging';
+import { logger, requestLogger, errorLogger, performanceMetrics } from './utils/logging';
 import { metricsMiddleware, register } from './utils/metrics';
 import { healthCheck, livenessCheck, readinessCheck } from './controllers/healthController';
 import tracingSdk from './utils/tracing';
@@ -31,9 +34,21 @@ tracingSdk;
 app.use(helmet());
 app.use(cors());
 
+// Rate limiting with higher limits for development/testing
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000, // Increased limit to 1000 requests per windowMs for development
+  message: {
+    error: 'Too many requests from this IP, please try again later.',
+  },
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+});
+
+app.use(limiter);
+
 // Safety net middleware - should be first to catch dangerous operations
 app.use(safetyNetMiddleware);
-
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
@@ -44,9 +59,22 @@ app.get('/test-route', (req, res) => {
   res.send('Route is working!');
 });
 
-// Redirect root to dashboard - this should be before static middleware
+// Redirect root to login page instead of dashboard
 app.get('/', (req, res) => {
-  res.redirect('/dashboard/index.html');
+  res.redirect('/authentication/auth-login-cover.html');
+});
+
+// Redirect dashboard to login if not authenticated (simplified for now)
+app.get('/dashboard', (req, res) => {
+  res.redirect('/authentication/auth-login-cover.html');
+});
+
+app.get('/dashboard/', (req, res) => {
+  res.redirect('/authentication/auth-login-cover.html');
+});
+
+app.get('/dashboard/index.html', (req, res) => {
+  res.redirect('/authentication/auth-login-cover.html');
 });
 
 // Serve static files (HTML, CSS, JS, images) from the project root
@@ -89,6 +117,12 @@ app.use(metricsMiddleware);
 // Database connection with error handling
 connectDB().catch(error => {
   console.error('Failed to connect to database:', error);
+  process.exit(1);
+});
+
+// Redis connection with error handling
+connectRedis().catch(error => {
+  console.error('Failed to connect to Redis:', error);
   process.exit(1);
 });
 

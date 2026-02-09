@@ -1,26 +1,27 @@
-# Use the official Node.js runtime as the base image
+# Use Node.js 18 Alpine as the base image
 FROM node:18-alpine
 
-# Set the working directory inside the container
+# Set working directory
 WORKDIR /app
 
-# Copy package.json and package-lock.json (if available)
+# Copy package files
 COPY package*.json ./
 
 # Install dependencies
-RUN npm ci --only=production
+RUN npm install
 
 # Copy the rest of the application code
 COPY . .
 
-# Create uploads directory for file uploads
-RUN mkdir -p uploads
-
-# Build the TypeScript application
+# Build TypeScript
 RUN npm run build
 
-# Expose the port the app runs on
+# Expose port
 EXPOSE 3000
 
-# Run the application
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3000/health || exit 1
+
+# Start the application
 CMD ["npm", "start"]

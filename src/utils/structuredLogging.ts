@@ -1,4 +1,5 @@
 import winston from 'winston';
+const DailyRotateFile = require('winston-daily-rotate-file');
 import { Request, Response, NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -48,23 +49,21 @@ const transports = [
       })
     )
   }),
-  new winston.transports.File({
-    filename: 'logs/error.log',
+  new DailyRotateFile({
+    filename: 'logs/error-%DATE%.log',
     level: 'error',
+    datePattern: 'YYYY-MM-DD',
+    maxSize: '20m',
+    maxFiles: '14d',
     format
   }),
-  new winston.transports.File({
-    filename: 'logs/combined.log',
+  new DailyRotateFile({
+    filename: 'logs/application-%DATE%.log',
+    datePattern: 'YYYY-MM-DD',
+    maxSize: '20m',
+    maxFiles: '14d',
     format
   }),
-  // Daily rotation transport (if needed)
-  // new winston.transports.DailyRotateFile({
-  //   filename: 'logs/application-%DATE%.log',
-  //   datePattern: 'YYYY-MM-DD',
-  //   maxSize: '20m',
-  //   maxFiles: '14d',
-  //   format
-  // })
 ];
 
 // Create logger instance
